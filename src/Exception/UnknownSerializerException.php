@@ -10,6 +10,6 @@ class UnknownSerializerException extends CommandBusException
 {
     public function __construct(string $type)
     {
-        parent::__construct(sprintf('Unknown serializer: %s.', $type));
+        parent::__construct(sprintf('Unknown serializer "%s".', $type));
     }
 }
