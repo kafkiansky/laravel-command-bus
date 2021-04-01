@@ -17,7 +17,7 @@ return [
             'default' => 'memory',
             'connections' => [
                 'memory' => [
-                    'dsn' => 'memory://',
+                    'url' => 'memory://',
                     'options' => [
                         // 'key' => 'value',
                     ],

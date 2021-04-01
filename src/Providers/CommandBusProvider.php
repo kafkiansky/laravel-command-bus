@@ -113,57 +113,75 @@ class CommandBusProvider extends ServiceProvider
     {
         $transports = [];
 
-        foreach ($config['connections'] as $key => $connection) {
-            $name = sprintf('onliner.commandbus.transport.%s', $key);
-
-            $this->app->singleton($name, function (Container $app) use ($key, $connection) {
-                switch (true) {
-                    case is_string($connection) && class_exists($connection):
-                    case is_string($connection) && $app->has($connection):
-                        return $app->get($connection);
-                    case is_string($connection):
-                        return TransportFactory::create($connection);
-                    case is_array($connection):
-                        return TransportFactory::create($connection['dsn'], $connection['options'] ?? []);
-                    default:
-                        throw new Exception\InvalidTransportException($key);
-                }
-            });
-
-            $transports[$key] = $name;
+        foreach ($config['connections'] ?? [] as $key => $connection) {
+            $transports[$key] = $this->registerTransportConnection($key, $connection);
         }
 
-        $this->app->singleton(Transport::class, function (Container $app) use ($transports) {
+        $this->app->singleton(Transport::class, function (Container $app) use ($config, $transports) {
             if (empty($transports)) {
-                return TransportFactory::default();
+                return (new TransportFactory($app))->default();
             }
 
-            if (count($transports) === 1) {
-                return $app->make($transports[array_key_first($transports)]);
-            }
-
-            return $app->make(Router::class);
-        });
-
-        $this->app->singleton(Router::class, function (Container $app) use ($config, $transports) {
             $default = $config['default'] ?? array_key_first($transports);
+            $router = new Router($this->getTransportInstance($default, $transports));
 
-            if (!isset($transports[$default])) {
-                throw new Exception\UnknownTransportException($default, array_keys($transports));
-            }
-
-            $router = new Router($app->make($default));
-
-            foreach ($config['routes'] as $pattern => $key) {
-                if (!isset($transports[$key])) {
-                    throw new Exception\UnknownTransportException($key, array_keys($transports));
-                }
-
-                $router->add($pattern, $app->make($transports[$key]));
+            foreach ($config['routes'] ?? [] as $pattern => $key) {
+                $router->add($pattern, $this->getTransportInstance($key, $transports));
             }
 
             return $router;
         });
+    }
+
+    /**
+     * @param string $key
+     * @param array $transports
+     *
+     * @return Transport
+     */
+    private function getTransportInstance(string $key, array $transports): Transport
+    {
+        if (!isset($transports[$key])) {
+            throw new Exception\UnknownTransportException($key, array_keys($transports));
+        }
+
+        return $this->app->get($transports[$key]);
+    }
+
+    /**
+     * Available config formats:
+     *
+     * [
+     *   'foo' => \App\CommandBus\Transport\RedisTransport::class,
+     *   'bar' => 'app.command_bus.transport.redis',
+     *   'baz' => 'amqp://localhost:5672',
+     *   'qux' => 'memory://',
+     *   'quz' => [
+     *     'url' => 'amqp://localhost:5672',
+     *     'options' => [
+     *       'exchange' => 'project',
+     *     ],
+     *   ],
+     * ]
+     *
+     * @param string $key
+     * @param mixed $config
+     *
+     * @return string
+     */
+    private function registerTransportConnection(string $key, $config): string
+    {
+        $name = sprintf('onliner.commandbus.transport.%s', $key);
+
+        $this->app->singleton($name, function (Container $app) use ($key, $config) {
+            if (!$transport = (new TransportFactory($app))->create($config)) {
+                throw new Exception\InvalidTransportException($key);
+            }
+
+            return $transport;
+        });
+
+        return $name;
     }
 
     /**
